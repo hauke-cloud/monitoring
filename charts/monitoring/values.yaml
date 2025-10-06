@@ -1,0 +1,155 @@
+# oAuth2 Proxy
+oauth2-proxy:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 64Mi
+
+# Kube Prometheus Stack
+kube-prometheus-stack:
+  crds:
+    upgrade:
+      job:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+  prometheus:
+    enabled: true
+    prometheusSpec:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 1
+          memory: 2Gi
+        limits:
+          memory: 4Gi
+      retention: 10d
+      serviceAccount:
+        create: true
+      serviceMonitorSelector: {}
+      podMonitorSelector: {}
+
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 1Gi
+      limits:
+        memory: 1.5Gi
+    testFramework:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 128Mi
+    downloadDashboards:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 128Mi
+    initChownData:
+      resources:
+        requests:
+          cpu: 500m
+          memory: 256Mi
+        limits:
+          memory: 256Mi
+    imageRenderer:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 128Mi
+    admin:
+      existingSecret: "grafana-admin-secret"
+    sidecar:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 128Mi
+      datasources:
+        enabled: true
+
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+
+  alertmanager:
+    enabled: true
+    alertmanagerSpec:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+      serviceAccount:
+        create: true
+
+  nodeExporter:
+    enabled: true
+
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+  kubeStateMetrics:
+    enabled: true
+
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+  prometheusOperator:
+    enabled: true
+    createCustomResource: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    prometheusConfigReloader:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+    admissionWebhooks:
+      deployment:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+      patch:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
