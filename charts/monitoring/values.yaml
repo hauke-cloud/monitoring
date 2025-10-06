@@ -1,5 +1,13 @@
 # oAuth2 Proxy
-oauth2-proxy:
+oauth2-proxy-prometheus:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 64Mi
+
+oauth2-proxy-alertmanager:
   resources:
     requests:
       cpu: 50m
