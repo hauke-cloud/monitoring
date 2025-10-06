@@ -26,9 +26,9 @@ kube-prometheus-stack:
       resources:
         requests:
           cpu: 1
-          memory: 2Gi
+          memory: 1Gi
         limits:
-          memory: 4Gi
+          memory: 1.5Gi
       retention: 10d
       serviceAccount:
         create: true
@@ -40,9 +40,9 @@ kube-prometheus-stack:
     resources:
       requests:
         cpu: 50m
-        memory: 1Gi
+        memory: 512Mi
       limits:
-        memory: 1.5Gi
+        memory: 1Gi
     testFramework:
       resources:
         requests:
