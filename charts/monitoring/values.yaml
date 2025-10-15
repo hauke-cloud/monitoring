@@ -45,10 +45,6 @@ kube-prometheus-stack:
 
   grafana:
     enabled: true
-    sidecar:
-      datasources:
-        skipReload: true
-        initDatasources: true
     resources:
       requests:
         cpu: 50m
@@ -94,9 +90,11 @@ kube-prometheus-stack:
           memory: 128Mi
       datasources:
         enabled: true
+        skipReload: true
 
       dashboards:
         enabled: true
+        skipReload: true
         label: grafana_dashboard
 
   alertmanager:
