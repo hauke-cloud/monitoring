@@ -6,6 +6,27 @@ oauth2-proxy-prometheus:
       memory: 64Mi
     limits:
       memory: 64Mi
+  redis:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 64Mi
+    sentinel:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 64Mi
+        limits:
+          memory: 64Mi
+    splitBrainDetection:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 48Mi
+        limits:
+          memory: 48Mi
 
 oauth2-proxy-alertmanager:
   resources:
@@ -14,6 +35,27 @@ oauth2-proxy-alertmanager:
       memory: 64Mi
     limits:
       memory: 64Mi
+  redis:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 64Mi
+    sentinel:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 64Mi
+        limits:
+          memory: 64Mi
+    splitBrainDetection:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 48Mi
+        limits:
+          memory: 48Mi
 
 # Kube Prometheus Stack
 kube-prometheus-stack:
