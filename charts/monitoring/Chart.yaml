@@ -16,3 +16,6 @@ dependencies:
     alias: oauth2-proxy-alertmanager
     version: "8.3.0"
     repository: "https://oauth2-proxy.github.io/manifests"
+  - name: karma
+    version: "2.11.0"
+    repository: "https://wiremind.github.io/wiremind-helm-charts"
