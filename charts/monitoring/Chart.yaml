@@ -6,23 +6,8 @@ version: 0.1.0
 appVersion: "0.0.1"
 dependencies:
   - name: kube-prometheus-stack
-    version: "83.4.0"
+    version: "91.2.3"
     repository: "https://prometheus-community.github.io/helm-charts"
-  - name: oauth2-proxy
-    alias: oauth2-proxy-prometheus
-    version: "8.3.0"
-    repository: "https://oauth2-proxy.github.io/manifests"
-    condition: oauth2-proxy-prometheus.enabled
-  - name: oauth2-proxy
-    alias: oauth2-proxy-alertmanager
-    version: "8.3.0"
-    repository: "https://oauth2-proxy.github.io/manifests"
-    condition: oauth2-proxy-alertmanager.enabled
-  - name: oauth2-proxy
-    alias: oauth2-proxy-karma
-    version: "8.3.0"
-    repository: "https://oauth2-proxy.github.io/manifests"
-    condition: oauth2-proxy-karma.enabled
   - name: karma
-    version: "2.11.0"
+    version: "2.13.1"
     repository: "https://wiremind.github.io/wiremind-helm-charts"
