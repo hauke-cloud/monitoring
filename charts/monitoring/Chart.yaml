@@ -11,3 +11,35 @@ dependencies:
   - name: karma
     version: "2.13.1"
     repository: "https://wiremind.github.io/wiremind-helm-charts"
+  # Logs
+  - name: loki
+    version: "18.15.1"
+    repository: "https://grafana-community.github.io/helm-charts"
+    condition: loki.enabled
+  # Traces
+  - name: tempo
+    version: "3.1.0"
+    repository: "https://grafana-community.github.io/helm-charts"
+    condition: tempo.enabled
+  # Profiles
+  - name: pyroscope
+    version: "2.4.0"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: pyroscope.enabled
+  # Long-term metrics
+  - name: mimir-distributed
+    alias: mimir
+    version: "6.2.1"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: mimir.enabled
+  # Collector, one per node: pod logs
+  - name: alloy
+    version: "1.13.1"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: alloy.enabled
+  # Collector, single instance: syslog, OTLP, Kubernetes events
+  - name: alloy
+    alias: alloy-receiver
+    version: "1.13.1"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: alloy-receiver.enabled

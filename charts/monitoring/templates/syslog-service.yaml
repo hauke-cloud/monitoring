@@ -1,0 +1,38 @@
+{{- $syslog := .Values.observability.syslog -}}
+{{- $receiver := index .Values "alloy-receiver" -}}
+{{- if and $receiver.enabled .Values.loki.enabled $syslog.enabled $syslog.listeners }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "monitoring.alloyReceiver.fullname" . }}-syslog
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monitoring.labels" . | nindent 4 }}
+    app.kubernetes.io/component: syslog
+  {{- with $syslog.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $syslog.service.type }}
+  {{- with $syslog.service.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
+  {{- if ne $syslog.service.type "ClusterIP" }}
+  externalTrafficPolicy: {{ $syslog.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- with $syslog.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ default "alloy-receiver" $receiver.nameOverride }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    {{- range $syslog.listeners }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .listenPort }}
+      protocol: {{ .protocol | upper }}
+    {{- end }}
+{{- end }}

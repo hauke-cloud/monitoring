@@ -1,0 +1,97 @@
+{{- $ds := .Values.observability.grafana.datasources -}}
+{{- if and $ds.enabled (or .Values.loki.enabled .Values.tempo.enabled .Values.pyroscope.enabled .Values.mimir.enabled) }}
+{{- /* Where span metrics and the service graph end up. */ -}}
+{{- $metricsUid := ternary "mimir" $ds.prometheusUid .Values.mimir.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "monitoring.fullname" . }}-observability-datasources
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monitoring.labels" . | nindent 4 }}
+    {{ $ds.label }}: {{ $ds.labelValue | quote }}
+data:
+  observability-datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      {{- if .Values.loki.enabled }}
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: {{ include "monitoring.loki.url" . }}
+        jsonData:
+          {{- if .Values.tempo.enabled }}
+          # `$$` is a literal `$` to Grafana's provisioning, which would
+          # otherwise expand it as an environment variable.
+          derivedFields:
+            - name: trace_id
+              matcherType: label
+              matcherRegex: trace_id
+              datasourceUid: tempo
+              url: $${__value.raw}
+              urlDisplayLabel: Open trace
+            - name: TraceID
+              matcherRegex: '(?:trace_?id|traceID)["=:\s]+"?(\w+)'
+              datasourceUid: tempo
+              url: $${__value.raw}
+              urlDisplayLabel: Open trace
+          {{- end }}
+      {{- end }}
+      {{- if .Values.tempo.enabled }}
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        access: proxy
+        url: {{ include "monitoring.tempo.url" . }}
+        jsonData:
+          nodeGraph:
+            enabled: true
+          serviceMap:
+            datasourceUid: {{ $metricsUid }}
+          tracesToMetrics:
+            datasourceUid: {{ $metricsUid }}
+            spanStartTimeShift: -5m
+            spanEndTimeShift: 5m
+            tags:
+              - key: service.name
+                value: service
+          {{- if .Values.loki.enabled }}
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: -5m
+            spanEndTimeShift: 5m
+            filterByTraceID: true
+            tags:
+              - key: service.name
+                value: service_name
+              - key: k8s.namespace.name
+                value: namespace
+          {{- end }}
+          {{- if .Values.pyroscope.enabled }}
+          tracesToProfiles:
+            datasourceUid: pyroscope
+            profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
+            tags:
+              - key: service.name
+                value: service_name
+          {{- end }}
+      {{- end }}
+      {{- if .Values.pyroscope.enabled }}
+      - name: Pyroscope
+        type: grafana-pyroscope-datasource
+        uid: pyroscope
+        access: proxy
+        url: {{ include "monitoring.pyroscope.url" . }}
+      {{- end }}
+      {{- if .Values.mimir.enabled }}
+      - name: Mimir
+        type: prometheus
+        uid: mimir
+        access: proxy
+        url: {{ include "monitoring.mimir.url" . }}/prometheus
+        jsonData:
+          prometheusType: Mimir
+          httpMethod: POST
+      {{- end }}
+{{- end }}

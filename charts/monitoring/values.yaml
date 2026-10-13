@@ -146,3 +146,508 @@ kube-prometheus-stack:
             memory: 128Mi
           limits:
             memory: 256Mi
+
+# Everything below is off by default. Each block is one signal next to the
+# metrics kube-prometheus-stack already covers, and mirrors a Grafana Cloud
+# product: Loki (logs), Tempo (traces), Pyroscope (profiles), Mimir (long-term
+# metrics) and Alloy (the collector feeding them).
+#
+# The components carry a fixed `fullnameOverride`, so they find each other
+# under the same Service names whatever the release is called.
+
+# Wiring rendered by this chart itself: the Alloy configuration, the Grafana
+# datasources and the Service that takes syslog from outside the cluster. All
+# of it follows the `enabled` switches of the components further down, so a
+# pipeline only shows up once both of its ends exist.
+observability:
+  # Value of the `cluster` label on every log line, event and OTLP metric the
+  # collectors forward.
+  cluster: ""
+
+  grafana:
+    datasources:
+      # One datasource per enabled component, cross-linked: a log line with a
+      # trace id opens the trace, a span opens its logs, metrics and profiles.
+      enabled: true
+      # What Grafana's datasource sidecar selects on.
+      label: grafana_datasource
+      labelValue: "1"
+      # uid of the Prometheus datasource kube-prometheus-stack provisions.
+      prometheusUid: prometheus
+
+  metrics:
+    # Where the receiver sends the metrics it is handed: OTLP metrics and the
+    # span metrics Tempo generates. Left empty this is Mimir when `mimir` is
+    # enabled, and otherwise Prometheus -- which only accepts them with
+    # `kube-prometheus-stack.prometheus.prometheusSpec.enableRemoteWriteReceiver`
+    # set. With neither, the receiver has no metrics pipeline.
+    remoteWriteUrl: ""
+
+  # Collected by `alloy`, one pod per node, from /var/log/pods.
+  podLogs:
+    enabled: true
+
+  # Everything below is served by `alloy-receiver`.
+  kubernetesEvents:
+    enabled: true
+
+  # OTLP on 4317 (gRPC) and 4318 (HTTP) of the `alloy-receiver` Service.
+  # Traces go to Tempo, logs to Loki, metrics to `metrics.remoteWriteUrl`.
+  otlp:
+    enabled: true
+
+  # Logs from machines that are not part of the cluster: routers, firewalls,
+  # hypervisors, anything that can point a syslog client at an address.
+  syslog:
+    enabled: true
+    # One Alloy listener and one Service port per entry. A listener parses
+    # exactly one format, so the two formats get a port each.
+    #
+    #   port        what the device connects to
+    #   listenPort  what Alloy binds inside the pod; above 1024, so the
+    #               container needs no extra capability
+    #   protocol    tcp or udp
+    #   format      rfc3164 (BSD syslog, what most devices send unless told
+    #               otherwise) or rfc5424
+    #   labels      extra labels for everything arriving on this listener
+    #
+    # VyOS:     set system syslog remote <address> port 514
+    #           set system syslog remote <address> protocol udp
+    #           set system syslog remote <address> facility all level info
+    # OPNsense: System > Settings > Logging > Remote, transport UDP(4) and
+    #           port 514 -- or tick "rfc5424" and use port 601.
+    listeners:
+      - name: rfc3164-udp
+        port: 514
+        listenPort: 1514
+        protocol: udp
+        format: rfc3164
+      - name: rfc3164-tcp
+        port: 514
+        listenPort: 1514
+        protocol: tcp
+        format: rfc3164
+      - name: rfc5424-udp
+        port: 601
+        listenPort: 1601
+        protocol: udp
+        format: rfc5424
+      - name: rfc5424-tcp
+        port: 601
+        listenPort: 1601
+        protocol: tcp
+        format: rfc5424
+    # The sender's own clock is ignored unless this is set: RFC 3164 carries
+    # neither year nor timezone, and a device with a wrong clock would have
+    # its lines rejected as too old.
+    useIncomingTimestamp: false
+    # A Service of its own, so the address the devices are configured with is
+    # not shared with anything else and survives changes to the rest.
+    service:
+      type: LoadBalancer
+      annotations: {}
+      # annotations:
+      #   # Cilium LB IPAM: pin the address the devices point at.
+      #   io.cilium/lb-ipam-ips: 10.0.0.10
+      #   # Hetzner: load balancers there carry no UDP, so drop the two udp
+      #   # listeners above and have the devices send TCP.
+      #   load-balancer.hetzner.cloud/location: nbg1
+      loadBalancerClass: ""
+      # Local keeps the sender's address, which ends up in the `source` label.
+      externalTrafficPolicy: Local
+      loadBalancerSourceRanges: []
+
+# Loki
+# Single binary on a volume. Good for a few GB of logs a day; past that, move
+# `loki.loki.storage` to an object store and switch `deploymentMode`.
+loki:
+  enabled: false
+  fullnameOverride: loki
+  deploymentMode: Monolithic
+  loki:
+    # One tenant. Everything in the cluster may push and query without an
+    # X-Scope-OrgID header.
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+    limits_config:
+      retention_period: 744h
+    compactor:
+      retention_enabled: true
+      delete_request_store: filesystem
+    # Feeds the pattern view of Logs Drilldown in Grafana.
+    pattern_ingester:
+      enabled: true
+    analytics:
+      reporting_enabled: false
+  singleBinary:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+    persistence:
+      size: 50Gi
+  # The chart defaults to three replicas of each of these, for the simple
+  # scalable mode, and refuses to render both modes at once.
+  write:
+    replicas: 0
+  read:
+    replicas: 0
+  backend:
+    replicas: 0
+  # The nginx in front of Loki only matters once the components are split up;
+  # with a single binary the `loki` Service is the endpoint.
+  gateway:
+    enabled: false
+  # Memcached, sized by default for a far larger installation.
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  test:
+    enabled: false
+  sidecar:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  monitoring:
+    serviceMonitor:
+      enabled: true
+    dashboards:
+      enabled: true
+
+# Tempo
+# Single binary on a volume.
+tempo:
+  enabled: false
+  fullnameOverride: tempo
+  tempo:
+    reportingEnabled: false
+    retention: 336h
+    # Turns spans into request rate, error rate and duration metrics and into
+    # the service graph. They are written through the receiver, which knows
+    # whether metrics live in Prometheus or Mimir -- see
+    # `observability.metrics`.
+    metricsGenerator:
+      enabled: true
+      remoteWriteUrl: http://alloy-receiver:9009/api/v1/metrics/write
+      storage:
+        # On the volume rather than the chart's /tmp, so samples not yet
+        # written survive a restart.
+        path: /var/tempo/generator/wal
+    overrides:
+      defaults:
+        metrics_generator:
+          processors:
+            - service-graphs
+            - span-metrics
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+  persistence:
+    enabled: true
+    size: 20Gi
+  serviceMonitor:
+    enabled: true
+
+# Pyroscope
+# Single binary on a volume.
+pyroscope:
+  enabled: false
+  pyroscope:
+    fullnameOverride: pyroscope
+    extraArgs:
+      log.level: info
+    persistence:
+      enabled: true
+      size: 20Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  # The Alloy this chart brings along scrapes every pod that asks for it
+  # through `profiles.grafana.com/<type>.scrape` annotations. Its scrape
+  # configuration is maintained upstream, so it stays a separate instance
+  # rather than being folded into `alloy-receiver`.
+  alloy:
+    # Keeps its pods out of the selectors of `alloy` below, which would
+    # otherwise match on the same chart name.
+    nameOverride: pyroscope-alloy
+    fullnameOverride: pyroscope-alloy
+    # `alloy` below already installs the CRD.
+    crds:
+      create: false
+    alloy:
+      enableReporting: false
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+  serviceMonitor:
+    enabled: true
+
+# Mimir
+# Long-term storage behind Prometheus, which keeps scraping and evaluating
+# rules and additionally remote-writes what it scrapes:
+#
+#   kube-prometheus-stack:
+#     prometheus:
+#       prometheusSpec:
+#         remoteWrite:
+#           - url: http://mimir-gateway/api/v1/push
+#
+# Sized as small as the chart goes: one replica of everything, no zones, no
+# Kafka. Mimir only stores to an object store; the bundled MinIO is there to
+# make that work out of the box and is the first thing to replace -- see
+# `mimir.mimir.structuredConfig.common.storage`.
+mimir:
+  enabled: false
+  fullnameOverride: mimir
+  mimir:
+    structuredConfig:
+      # One tenant, as with Loki.
+      multitenancy_enabled: false
+      usage_stats:
+        enabled: false
+      # The classic architecture: distributors write to ingesters directly
+      # instead of through Kafka.
+      ingest_storage:
+        enabled: false
+        kafka:
+          address: null
+          topic: null
+          auto_create_topic_default_partitions: null
+      distributor:
+        remote_timeout: null
+      ingester:
+        push_grpc_method_enabled: null
+        ring:
+          replication_factor: 1
+      store_gateway:
+        sharding_ring:
+          replication_factor: 1
+      limits:
+        compactor_blocks_retention_period: 1y
+        # The defaults fit a trial tenant, not a whole cluster's metrics.
+        max_global_series_per_user: 1500000
+        ingestion_rate: 100000
+        ingestion_burst_size: 2000000
+  kafka:
+    enabled: false
+  minio:
+    enabled: true
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  # Prometheus still owns alerting and rules.
+  alertmanager:
+    enabled: false
+  ruler:
+    enabled: false
+  overrides_exporter:
+    enabled: false
+  # Only needed to coordinate rollouts across zones.
+  rollout_operator:
+    enabled: false
+  distributor:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  ingester:
+    replicas: 1
+    zoneAwareReplication:
+      enabled: false
+    persistentVolume:
+      size: 20Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+  store_gateway:
+    replicas: 1
+    zoneAwareReplication:
+      enabled: false
+    persistentVolume:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  compactor:
+    replicas: 1
+    persistentVolume:
+      size: 20Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  querier:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  query_frontend:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  query_scheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  gateway:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  metaMonitoring:
+    serviceMonitor:
+      enabled: true
+    dashboards:
+      enabled: true
+
+# Alloy, one per node
+# Tails the container logs of the node it runs on. What it collects is set in
+# `observability.podLogs`; the configuration itself is rendered by this chart
+# into the ConfigMap named here.
+alloy:
+  enabled: false
+  fullnameOverride: alloy
+  alloy:
+    configMap:
+      create: false
+      name: alloy-config
+      key: config.alloy
+    enableReporting: false
+    # Read positions live on the node, so a restarted pod carries on where the
+    # last one stopped instead of sending every log file again.
+    storagePath: /var/lib/alloy
+    mounts:
+      varlog: true
+      extra:
+        - name: storage
+          mountPath: /var/lib/alloy
+    # The image runs as root, which reading /var/log/pods and writing to the
+    # hostPath both need.
+    extraEnv:
+      - name: NODE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: spec.nodeName
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  controller:
+    type: daemonset
+    # Control plane nodes produce logs too.
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+    volumes:
+      extra:
+        - name: storage
+          hostPath:
+            path: /var/lib/alloy
+            type: DirectoryOrCreate
+  serviceMonitor:
+    enabled: true
+
+# Alloy, single instance
+# The address everything that pushes talks to: syslog from outside the cluster,
+# OTLP from instrumented workloads, Tempo's span metrics. It also reads the
+# Kubernetes events, which is why there is exactly one of it -- a second
+# replica would store every event twice. What it does is set in
+# `observability`.
+alloy-receiver:
+  enabled: false
+  fullnameOverride: alloy-receiver
+  # `alloy` above already installs the CRD.
+  crds:
+    create: false
+  alloy:
+    configMap:
+      create: false
+      name: alloy-receiver-config
+      key: config.alloy
+    enableReporting: false
+    extraPorts:
+      - name: otlp-grpc
+        port: 4317
+        targetPort: 4317
+        protocol: TCP
+      - name: otlp-http
+        port: 4318
+        targetPort: 4318
+        protocol: TCP
+      - name: remote-write
+        port: 9009
+        targetPort: 9009
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  controller:
+    type: deployment
+    replicas: 1
+  serviceMonitor:
+    enabled: true

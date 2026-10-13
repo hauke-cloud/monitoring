@@ -1,0 +1,15 @@
+{{- /*
+Renders nothing. Stops the release on combinations of switches that install
+cleanly and then quietly lose data.
+*/ -}}
+{{- $receiver := index .Values "alloy-receiver" -}}
+{{- $generator := .Values.tempo.tempo.metricsGenerator -}}
+{{- $receiverUrl := printf "http://%s:" (include "monitoring.alloyReceiver.fullname" .) -}}
+{{- if and .Values.tempo.enabled $generator.enabled (hasPrefix $receiverUrl $generator.remoteWriteUrl) }}
+{{- if not $receiver.enabled }}
+{{- fail "tempo.tempo.metricsGenerator writes its span metrics through alloy-receiver, which is disabled. Set alloy-receiver.enabled, point tempo.tempo.metricsGenerator.remoteWriteUrl somewhere else, or turn the generator off." }}
+{{- end }}
+{{- if not (include "monitoring.metrics.remoteWriteUrl" .) }}
+{{- fail "tempo.tempo.metricsGenerator is enabled, but alloy-receiver has nowhere to send its span metrics. Enable mimir, set kube-prometheus-stack.prometheus.prometheusSpec.enableRemoteWriteReceiver, set observability.metrics.remoteWriteUrl, or turn the generator off." }}
+{{- end }}
+{{- end }}

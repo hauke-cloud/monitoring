@@ -1,0 +1,188 @@
+{{- $obs := .Values.observability -}}
+{{- $receiver := index .Values "alloy-receiver" -}}
+{{- if $receiver.enabled }}
+{{- $logs := .Values.loki.enabled -}}
+{{- $traces := .Values.tempo.enabled -}}
+{{- $remoteWriteUrl := include "monitoring.metrics.remoteWriteUrl" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $receiver.alloy.configMap.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "monitoring.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alloy-receiver
+data:
+  {{ $receiver.alloy.configMap.key | default "config.alloy" }}: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+    {{- if $logs }}
+
+    loki.write "default" {
+      endpoint {
+        url = "{{ include "monitoring.loki.url" . }}/loki/api/v1/push"
+      }
+      {{- with $obs.cluster }}
+
+      external_labels = {
+        cluster = {{ . | quote }},
+      }
+      {{- end }}
+    }
+    {{- if $obs.kubernetesEvents.enabled }}
+
+    loki.source.kubernetes_events "cluster" {
+      job_name   = "kubernetes/events"
+      log_format = "logfmt"
+      forward_to = [loki.write.default.receiver]
+    }
+    {{- end }}
+    {{- if and $obs.syslog.enabled $obs.syslog.listeners }}
+
+    // What a syslog message says about itself, turned into labels. `host` is
+    // the name the device gives; `source` the address the connection came
+    // from, for devices that give none or the same one.
+    loki.relabel "syslog" {
+      forward_to = []
+
+      rule {
+        source_labels = ["__syslog_message_hostname"]
+        target_label  = "host"
+      }
+
+      rule {
+        source_labels = ["__syslog_connection_ip_address"]
+        target_label  = "source"
+      }
+
+      rule {
+        source_labels = ["__syslog_message_app_name"]
+        target_label  = "app"
+      }
+
+      rule {
+        source_labels = ["__syslog_message_facility"]
+        target_label  = "facility"
+      }
+
+      rule {
+        source_labels = ["__syslog_message_severity"]
+        target_label  = "level"
+      }
+    }
+    {{- range $obs.syslog.listeners }}
+
+    loki.source.syslog {{ .name | replace "-" "_" | quote }} {
+      listener {
+        address       = "0.0.0.0:{{ .listenPort }}"
+        protocol      = {{ .protocol | lower | quote }}
+        syslog_format = {{ .format | default "rfc3164" | quote }}
+        {{- if $obs.syslog.useIncomingTimestamp }}
+        use_incoming_timestamp = true
+        {{- end }}
+        labels        = {
+          job = "syslog",
+          {{- range $key, $value := .labels }}
+          {{ $key }} = {{ $value | quote }},
+          {{- end }}
+        }
+      }
+
+      relabel_rules = loki.relabel.syslog.rules
+      forward_to    = [loki.write.default.receiver]
+    }
+    {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if $remoteWriteUrl }}
+
+    prometheus.remote_write "default" {
+      endpoint {
+        url = {{ $remoteWriteUrl | quote }}
+      }
+      {{- with $obs.cluster }}
+
+      external_labels = {
+        cluster = {{ . | quote }},
+      }
+      {{- end }}
+    }
+
+    // Tempo writes its span metrics and service graph here, so that it does
+    // not have to know whether metrics live in Prometheus or Mimir.
+    prometheus.receive_http "default" {
+      http {
+        listen_address = "0.0.0.0"
+        listen_port    = 9009
+      }
+
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+    {{- end }}
+    {{- if and $obs.otlp.enabled (or $logs $traces $remoteWriteUrl) }}
+
+    otelcol.receiver.otlp "default" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        {{- if $traces }}
+        traces  = [otelcol.processor.batch.default.input]
+        {{- end }}
+        {{- if $logs }}
+        logs    = [otelcol.processor.batch.default.input]
+        {{- end }}
+        {{- if $remoteWriteUrl }}
+        metrics = [otelcol.processor.batch.default.input]
+        {{- end }}
+      }
+    }
+
+    otelcol.processor.batch "default" {
+      output {
+        {{- if $traces }}
+        traces  = [otelcol.exporter.otlp.tempo.input]
+        {{- end }}
+        {{- if $logs }}
+        logs    = [otelcol.exporter.otlphttp.loki.input]
+        {{- end }}
+        {{- if $remoteWriteUrl }}
+        metrics = [otelcol.exporter.prometheus.default.input]
+        {{- end }}
+      }
+    }
+    {{- if $traces }}
+
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "{{ include "monitoring.tempo.fullname" . }}.{{ .Release.Namespace }}.svc:4317"
+
+        tls {
+          insecure = true
+        }
+      }
+    }
+    {{- end }}
+    {{- if $logs }}
+
+    otelcol.exporter.otlphttp "loki" {
+      client {
+        endpoint = "{{ include "monitoring.loki.url" . }}/otlp"
+      }
+    }
+    {{- end }}
+    {{- if $remoteWriteUrl }}
+
+    otelcol.exporter.prometheus "default" {
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+    {{- end }}
+    {{- end }}
+{{- end }}
